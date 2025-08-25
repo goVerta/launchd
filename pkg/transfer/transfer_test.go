@@ -1,7 +1,6 @@
 package transfer
 
 import (
-	"reflect"
 	"testing"
 )
 
