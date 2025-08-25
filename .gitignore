@@ -22,3 +22,6 @@ coverage.out
 *.iml
 .DS_Store
 Thumbs.db
+
+# Windows reserved name accidentally present
+NUL
