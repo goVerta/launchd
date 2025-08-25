@@ -19,6 +19,6 @@ func TestSCP_Commands(t *testing.T) {
 		t.Fatalf("unexpected: %v", err)
 	}
 	if len(ex.calls) != 2 { t.Fatalf("calls=%d", len(ex.calls)) }
-	if ex.calls[0][0] != "bash" { t.Fatalf("want bash pre-mkdir, got %v", ex.calls[0]) }
-	if ex.calls[1][0] != "scp" { t.Fatalf("want scp, got %v", ex.calls[1]) }
+	if ex.calls[0][0] != "scp" { t.Fatalf("want scp first, got %v", ex.calls[0]) }
+	if ex.calls[1][0] != "bash" { t.Fatalf("want bash -lc ssh install second, got %v", ex.calls[1]) }
 }
