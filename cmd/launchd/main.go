@@ -33,7 +33,7 @@ func main() {
 
     cfg, err := config.ParseDeployFlags(os.Args[2:], config.DeployConfig{
         Host:    "",
-        User:    os.Getenv("USER"),
+        User:    getDefaultUser(),
         AppPath: "",
         Port:    8080,
         Timeout: 60 * time.Second,
@@ -92,4 +92,12 @@ func main() {
 
 func usage() {
     fmt.Println("usage: launchd deploy --host <ip> --user <ssh-user> --app ./path/to/app --port <port>")
+}
+
+// getDefaultUser returns USER if set, otherwise falls back to Windows USERNAME.
+func getDefaultUser() string {
+    if u := os.Getenv("USER"); u != "" {
+        return u
+    }
+    return os.Getenv("USERNAME")
 }

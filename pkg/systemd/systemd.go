@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"os"
 
 	"github.com/goVerta/launchd/internal/executil"
 )
@@ -42,8 +43,20 @@ func unitContent(s ServiceSpec) string {
 func Setup(exec executil.Executor, user, host string, spec ServiceSpec) error {
 	if exec == nil { return fmt.Errorf("nil executor") }
 	unit := unitContent(spec)
-	path := fmt.Sprintf("/etc/systemd/system/%s.service", spec.Name)
-	// saadhtiwana: write unit via sudo tee for root-ownership, then enable+restart
-	cmd := fmt.Sprintf("ssh %s@%s 'echo %q | sudo tee %s >/dev/null && sudo systemctl daemon-reload && sudo systemctl enable %s && sudo systemctl restart %s'", user, host, unit, path, spec.Name, spec.Name)
+	// Write unit to a local temporary file to preserve exact newlines/content
+	tmpFile, err := os.CreateTemp("", spec.Name+"-*.service")
+	if err != nil { return err }
+	tmpName := tmpFile.Name()
+	if _, err := tmpFile.WriteString(unit); err != nil { _ = tmpFile.Close(); _ = os.Remove(tmpName); return err }
+	if err := tmpFile.Close(); err != nil { _ = os.Remove(tmpName); return err }
+	defer os.Remove(tmpName)
+
+	remoteTmp := fmt.Sprintf("/tmp/%s.service", spec.Name)
+	finalPath := fmt.Sprintf("/etc/systemd/system/%s.service", spec.Name)
+
+	// 1) Copy unit to remote tmp
+	if err := exec.Run("scp", "-q", tmpName, fmt.Sprintf("%s@%s:%s", user, host, remoteTmp)); err != nil { return err }
+	// 2) Install unit with proper ownership and permissions, then reload+enable+restart
+	cmd := fmt.Sprintf("ssh %s@%s 'sudo install -D -m 0644 -o root -g root %s %s && sudo systemctl daemon-reload && sudo systemctl enable %s && sudo systemctl restart %s'", user, host, remoteTmp, finalPath, spec.Name, spec.Name)
 	return exec.Run("bash", "-lc", cmd)
 }

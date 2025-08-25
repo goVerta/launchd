@@ -16,6 +16,7 @@ func TestSetup_IssuesSSH(t *testing.T) {
 	if err := Setup(ex, "alice", "host", s); err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
-	if len(ex.calls) != 1 { t.Fatalf("calls=%d", len(ex.calls)) }
-	if ex.calls[0][0] != "bash" { t.Fatalf("expected bash -lc, got %v", ex.calls[0]) }
+	if len(ex.calls) != 2 { t.Fatalf("calls=%d", len(ex.calls)) }
+	if ex.calls[0][0] != "scp" { t.Fatalf("expected scp first, got %v", ex.calls[0]) }
+	if ex.calls[1][0] != "bash" { t.Fatalf("expected bash -lc second, got %v", ex.calls[1]) }
 }
