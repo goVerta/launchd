@@ -1,65 +1,100 @@
 # launchd
-Deterministic deploy orchestrator for single-binary Go services anchored to Linux systemd. launchd operationalizes a minimal, auditable deploy surface by composing battle-tested primitives: the resident Go toolchain for compilation, OpenSSH for transport and privileged control, systemd for service lifecycle, an optional migrator for schema evolution, and an HTTP health contract for liveness attestation. The objective function is predictability under duress, not novelty; the codebase is dependency-thin and tuned for reproducible behavior across heterogeneous fleet baselines.
+Launchd is a simple tool that helps you deploy a Go program (a single binary) to a Linux server that uses systemd. Think of it as a very small CI/CD helper you can run from your laptop.
 
-## Conceptual Premise
+It does five things for you:
+- Build your Go app locally.
+- Copy the binary to your server over SSH.
+- Create/refresh a systemd service for it.
+- Optionally run database migrations.
+- Check that the app is healthy before finishing.
 
-The dominant substrate for “small-but-critical” services is a single daemon under systemd supervision. For these domains, heavyweight CI/CD machinery introduces variance without proportional utility. launchd prefers an austere convergence model: converge a binary onto a machine, converge a unit into systemd, converge the database state via idempotent migrations, and converge process readiness via health probes. Each convergence step is a transparent syscall to a canonical tool, yielding failure surfaces that are legible to any seasoned operator.
+If you’re new to servers, follow this guide step by step. You don’t need Docker or a complex CI system.
 
-Assumptions:
-- A Go main package constitutes the service.
-- SSH reachability with privilege elevation exists to manage units.
-- The service exposes `/health` on a chosen TCP port.
+## What you need (prerequisites)
+- A Go project with a `main` package you can build.
+- Your laptop/workstation with:
+  - Go installed
+  - OpenSSH client (`ssh`, `scp`)
+- A Linux server with:
+  - systemd (most modern distros have it)
+  - SSH access (you can log in with a user that can use `sudo`)
+  - Network port open for your app (e.g., 8080)
+- Your app should expose a health endpoint like `GET /health` that returns 200 OK when ready.
 
-## MVP Scope
-
-- CLI: `launchd deploy --host <ip> --user <ssh-user> --app ./path/to/app --port <port> [--timeout <dur>]`.
-- Pipeline: Compile ➝ Transfer ➝ systemd Provision ➝ Migrate (optional) ➝ Health Gate.
-- Properties: idempotent (safe re-entrance), deterministic (explicit tooling), strict error surfacing, and minimal environmental preconditions (Go + OpenSSH).
-
-### Stage Semantics
-- Compile: `go build -o /tmp/<app>` using the resident toolchain; no hermetic wrapper.
-- Transfer: `scp` to `/usr/local/bin/<app>` after ensuring parent directory ownership is sane.
-- systemd: materialize a unit, `daemon-reload`, `enable`, `restart`—idempotent operations.
-- Migrations: opportunistic `migrate up` if a migrator exists on the target PATH.
-- Health: poll `http://<host>:<port>/health` until success or deadline expiry.
-
-## Example Usage
+## Install / Build launchd
+Clone this repo and build the CLI:
 
 ```bash
-launchd deploy --host 203.0.113.10 --user ubuntu --app ./examples/hello --port 8080 --timeout 60s
+git clone <this-repo-url>
+cd launchd
+go build -o launchd ./cmd/launchd
 ```
 
-On completion, the service is registered as `<app>.service`, executes `/usr/local/bin/<app> --port=<port>`, and is enabled for boot.
+This creates a `launchd` binary in the project root. Optionally, move it into your PATH:
 
-## Design Guarantees
+```bash
+mv launchd /usr/local/bin/
+```
 
-- Determinism: all side effects mediated by explicit tools (`go`, `scp`, `ssh`, `systemctl`).
-- Idempotence: repeated invocations converge; non-destructive `enable`, guarded migrations.
-- Failure Locality: stages short-circuit with precise logging; no ambiguous partial states.
-- Observability: microsecond timestamps and stage banners designed for operator cognition.
-- Minimality: no bespoke protocol layers; everything deferential to Unix contracts.
+## Prepare your app
+Make sure your app builds locally:
 
-## Future Roadmap
+```bash
+go build -o ./bin/myapp ./path/to/your/cmd
+```
 
-- Artifact integrity: checksums, content-addressed remote layout, atomic swaps.
-- Principle of Least Privilege: dedicated system users, hardening of unit sandboxing.
-- Transport hardening: native SSH client (keyboard-interactive, agent-forwarding policies) while preserving zero-daemon requirements.
-- Policy engines: JSON-structured logs, exponential backoff policies, retry budgets.
-- Migration adapters: goose, golang-migrate, app-native hooks with transactional guards.
+Also ensure your app can start with a port flag or env (for example `--port 8080`) and serves `/health`.
 
-## Organizational Context
+## Quick start: deploy in one command
+Run from your laptop (replace placeholders):
 
-This codebase is authored under the goVerta collective and aspires to the production rigor expected of core-infra artifacts. The project is intentionally conservative in feature accretion, biasing toward operability, determinism, and testable failure semantics over breadth.
+```bash
+launchd deploy \
+  --host <server-ip-or-dns> \
+  --user <ssh-username> \
+  --app  ./path/to/your/app \
+  --port <port> \
+  --timeout 60s
+```
 
-## Contributors and Roles
+What happens:
+1) Your app is compiled.
+2) The binary is copied to `/usr/local/bin/<app>` on the server.
+3) A systemd unit `<app>.service` is created/updated and (re)started.
+4) Optional migrations run if configured.
+5) Launchd waits for `http://<host>:<port>/health` to be OK.
 
-- Saad H. Tiwana — lead author, deployment pipeline, systemd strategy, reliability posture  
-  GitHub: https://github.com/saadhtiwana
-- Ahmad Mustafa — SSH/SCP transport hardening, testing harnesses  
-  GitHub: https://github.com/ahmadmustafa02
-- Majid Farooq Qureshi — QA and Toolsmith, Makefile/CI touchpoints, documentation QA  
-  GitHub: https://github.com/Majid-Farooq-Qureshi
+On success, your service is enabled on boot and running under systemd.
 
-Saad authored the core code; Ahmad and Majid contributed engineering and QA functions across transport, tests, and docs.
+## How it works (simple explanation)
+- Build: uses your local Go toolchain to compile your app.
+- Transfer: uses `scp` over SSH to put the binary on the server.
+- Service: writes a `.service` file, runs `systemctl daemon-reload`, `enable`, and `restart`.
+- Migrate (optional): calls a migration tool if you have one installed on the server.
+- Health check: polls your `/health` endpoint until it responds OK or times out.
 
-— saad and gang is who build this
+## Common problems and fixes
+- SSH fails: verify `ssh <user>@<host>` works and keys/Passwords are set up.
+- Sudo prompts: ensure your SSH user can run the necessary `systemctl` and file copy with `sudo`.
+- Port in use: stop whatever is using that port or change `--port`.
+- Health check fails: make sure your service starts quickly, listens on the right port, and returns 200 on `/health`.
+- See logs: `ssh <user>@<host> 'sudo journalctl -u <app>.service -f'`.
+
+## Remove or stop the service (on the server)
+```bash
+sudo systemctl stop <app>.service
+sudo systemctl disable <app>.service
+sudo rm -f /usr/local/bin/<app>
+sudo rm -f /etc/systemd/system/<app>.service
+sudo systemctl daemon-reload
+```
+
+## Safety and re-runs
+You can run the same deploy command again. It will overwrite the binary, refresh the unit, and restart safely. This is called idempotent behavior.
+
+## FAQ
+- Do I need Docker? No.
+- Do I need Go on the server? No, only on your laptop (build happens locally).
+- Do I need root? You need `sudo` to install the binary and manage systemd.
+
+Saad and gang is who build this
